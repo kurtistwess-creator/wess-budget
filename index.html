@@ -1024,6 +1024,11 @@ button.fund-badge:hover{transform:scale(1.04);background:var(--accent-hover)}
 #settings-sheet .field{display:grid;gap:6px;margin-bottom:10px}
 #settings-sheet .field input,#c-code{height:var(--control);width:100%;padding:0 12px;border-radius:10px;border:1px solid var(--field-line);background:var(--field);color:var(--ink);font-size:15px}
 #settings-sheet .field input:focus,#c-code:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px var(--ring)}
+/* Settings › Shared budget */
+.set-explain{margin:0 0 6px}
+.set-code{font-size:20px;letter-spacing:.14em;font-variant-numeric:tabular-nums}
+.set-links{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+a.textbtn{text-decoration:none}
 /* Net worth › What you own: every row the same grid, with a round × and a round ＋, all 40px */
 .nw-own .pline{grid-template-columns:minmax(0,1fr) 120px 40px;align-items:center}
 .nw-own .pline:has(.b2-del.confirm){grid-template-columns:minmax(0,1fr) 120px auto}
@@ -1385,13 +1390,13 @@ const Cloud={sb:null,user:null,hid:null,code:null,pending:{},
     if(data&&data[0]){this.hid=data[0].household_id;this.code=data[0].households&&data[0].households.invite_code;try{localStorage.setItem('wfb-hid',JSON.stringify({u:this.user.id,hid:this.hid,code:this.code}))}catch(e){}}
   },
   async loadAll(){
-    const {data,error}=await this.sb.from('budget_kv').select('key,value').eq('household_id',this.hid);if(error)throw error;
+    const {data,error}=await this.sb.from('budget_kv').select('key,value').eq('household_id',this.hid);if(error)throw error;this.last=Date.now();
     const out={plan:null,months:{}};for(const r of data){if(r.key==='plan')out.plan=r.value;else if(r.key.startsWith('month-'))out.months[r.key.slice(6)]=r.value}
     return out;
   },
   async put(key,value){
     let error;try{({error}=await this.sb.from('budget_kv').upsert({household_id:this.hid,key,value,updated_at:new Date().toISOString(),updated_by:this.user.id}))}catch(e){error=e}
-    if(error){this.pending[key]=value;this.savePending();throw error}if(key in this.pending){delete this.pending[key];this.savePending()}
+    if(error){this.pending[key]=value;this.savePending();throw error}this.last=Date.now();if(key in this.pending){delete this.pending[key];this.savePending()}
   },
   // changes that haven't reached the shared budget yet survive quitting the app
   savePending(){try{localStorage.setItem('wfb-pending',JSON.stringify(this.pending))}catch(e){}},
@@ -2720,12 +2725,28 @@ function debtCelebration(d){
 }
 
 /* ================= Settings ================= */
+// Settings › Shared budget: who you're signed in as, whether it's synced, the invite code, and links to the online parts
+const SITE_URL='https://kurtistwess-creator.github.io/wess-budget/';
+function sharedSettingsHTML(row){
+  if(!Cloud.ready)return '';
+  const n=Object.keys(Cloud.pending||{}).length,ago=t=>{if(!t)return '';const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?`${m} min ago`:`${Math.round(m/60)} hr ago`};
+  const status=!Cloud.user?'Not signed in':!Cloud.hid?'Signed in, not sharing yet':!navigator.onLine?`Offline${n?` · ${plural(n,'change')} waiting to upload`:''}`:n?`${plural(n,'change')} waiting to upload`:`✓ Up to date${Cloud.last?` · synced ${ago(Cloud.last)}`:''}`;
+  const link=(href,label)=>`<a class="textbtn subtle" href="${href}" target="_blank" rel="noopener">${label} ↗</a>`;
+  return `<div class="set-group"><h3>Shared budget</h3>
+    <p class="sub set-explain">Your budget is saved online so you and ${esc(personName('b'))} see the same numbers. This Mac also keeps its own copy, so it works offline and catches up when you’re back online.</p>
+    ${row('Account',Cloud.user?esc(Cloud.user.email):'Sign in to share your budget',Cloud.user?`<button class="textbtn subtle" id="c-signout">Sign out</button>`:`<button class="textbtn primary" data-opencloud>Sign in</button>`)}
+    ${row('Status',status,Cloud.on?`<button class="textbtn subtle" data-syncnow>Sync now</button>`:Cloud.user?`<button class="textbtn primary" data-opencloud>Set up</button>`:'')}
+    ${Cloud.code?row('Invite code',`${esc(personName('b'))} enters this once, after signing in, to join your budget`,`<b class="set-code">${esc(Cloud.code)}</b>`):''}
+    ${row(`${esc(personName('b'))}’s app`,`On Windows: open this link in Edge, then ⋯ → Apps → Install this site as an app`,`<span class="set-links"><button class="textbtn subtle" data-copy="${SITE_URL}">Copy link</button>${link(SITE_URL,'Open')}</span>`)}
+    ${row('Where it lives','Your budget data is in Supabase. The app’s Windows version is published on GitHub. You never need to open these.',`<span class="set-links">${link('https://supabase.com/dashboard/project/nodladyhgqkwnnvfyagt/editor','Supabase')}${link('https://github.com/kurtistwess-creator/wess-budget','GitHub')}</span>`)}
+  </div>`;
+}
 function settingsHTML(){
   const st=plan.settings,mac=Store.mode==='native',caps=Store.caps||{},pr=Store.prefs||{};
   const sw=(attr,on,dis)=>`<button class="switch ${on?'on':''}" ${attr} role="switch" aria-checked="${!!on}" ${dis?'disabled':''}><i></i></button>`;
   const row=(t,sub,ctl)=>`<div class="set-row"><div><b>${t}</b>${sub?`<span>${sub}</span>`:''}</div>${ctl}</div>`;
   return `<div class="sheet-head"><h2 id="settings-title">Settings</h2><button class="iconbtn" data-close-settings aria-label="Close">×</button></div>
-    ${Cloud.ready?`<div class="set-group"><h3>Shared budget</h3>${row(Cloud.on?'On, syncing':'Off',Cloud.on?`Signed in as ${esc(Cloud.user.email)} · code ${esc(Cloud.code||'')}`:'Share one budget between your Mac and her Windows computer',`<button class="textbtn subtle" data-opencloud>${Cloud.on?'Manage':'Set up'}</button>`)}</div>`:''}
+    ${sharedSettingsHTML(row)}
     <div class="set-group"><h3>Household</h3>
       ${row('Your name','',`<input class="set-in" data-set="nameA" value="${esc(plan.people.a)}" maxlength="20" aria-label="Your name">`)}
       ${row('Spouse’s name','',`<input class="set-in" data-set="nameB" value="${esc(plan.people.b)}" maxlength="20" aria-label="Spouse’s name">`)}</div>
@@ -2859,6 +2880,10 @@ document.addEventListener('click',e=>{
   if(t&&t.dataset.plansec){setPlanSec(t.dataset.plansec);return}
   if(t&&t.dataset.opensettings!=null){openSettings();return}
   if(t&&t.dataset.opencloud!=null){cloudMsg='';openCloud();return}
+  if(t&&t.dataset.syncnow!=null){t.textContent='Syncing…';Cloud.resync().then(()=>{toast(Object.keys(Cloud.pending).length?'Still offline. Changes are saved on this Mac.':'Up to date');openSettings()});return}
+  if(t&&t.dataset.copy){const v=t.dataset.copy,done=()=>{t.textContent='Copied';setTimeout(()=>{t.textContent='Copy link'},1500)};
+    (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(v):Promise.reject()).then(done,()=>{const i=document.createElement('textarea');i.value=v;document.body.appendChild(i);i.select();try{document.execCommand('copy');done()}catch(e){}i.remove()});return}
+  if(t&&t.id==='c-signout'&&t.closest('.settings')&&!$('c-email')){cloudAction('c-signout').then(()=>openSettings());return}
   if(t&&/^c-(signin|signup|create|join|signout)$/.test(t.id)){cloudAction.email=($('c-email')||{}).value;cloudAction.pass=($('c-pass')||{}).value;cloudAction(t.id);return}
   if(t&&(t.dataset.logstep!=null||t.dataset.paydebt)){
     // jump to This month and open Add transaction, already set to the Baby Step fund
