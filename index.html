@@ -1449,7 +1449,8 @@ function cloudHTML(){
   if(!Cloud.user)return `${head}<p class="sub">Sign in so you and ${esc(personName('b'))} share one budget across your Mac and her Windows computer. Changes show up on both, live.</p>
     <div class="set-group"><div class="field"><label for="c-email">Email</label><input id="c-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
     <div class="field"><label for="c-pass">Password</label><input id="c-pass" type="password" autocomplete="current-password" placeholder="At least 8 characters"></div></div>
-    <div class="step-actions"><button class="textbtn primary" id="c-signin" ${cloudBusy?'disabled':''}>Sign in</button><button class="textbtn subtle" id="c-signup" ${cloudBusy?'disabled':''}>Create account</button></div>${msg}`;
+    <div class="step-actions"><button class="textbtn primary" id="c-signin" ${cloudBusy?'disabled':''}>Sign in</button><button class="textbtn subtle" id="c-signup" ${cloudBusy?'disabled':''}>Create account</button></div>
+    <p class="sub">Didn’t get the confirmation email, or the link didn’t work? Type your email above, then <button class="from" id="c-resend">Resend confirmation email</button></p>${msg}`;
   if(!Cloud.hid)return `${head}<p class="sub">Signed in as <b>${esc(Cloud.user.email)}</b>. Start your shared budget, or join the one your partner started.</p>
     <div class="set-group"><h3>Start ours</h3><p class="sub">Uploads the budget on this device so you can both use it.</p><div><button class="textbtn primary" id="c-create" ${cloudBusy?'disabled':''}>Start our shared budget</button></div></div>
     <div class="set-group"><h3>Join with a code</h3><div class="inc-row" style="grid-template-columns:minmax(0,1fr) auto"><input id="c-code" maxlength="6" placeholder="ABC123" style="text-transform:uppercase" aria-label="Invite code"><button class="textbtn" id="c-join" ${cloudBusy?'disabled':''}>Join</button></div><p class="sub">This replaces the budget on this device with the shared one.</p></div>
@@ -1466,7 +1467,7 @@ async function cloudAction(id){
       const email=($('c-email')||{}).value||cloudAction.email||'',password=($('c-pass')||{}).value||cloudAction.pass||'';
       if(!/^\S+@\S+\.\S+$/.test(email.trim()))throw new Error('Enter your email address.');
       if(password.length<8)throw new Error('Use a password with at least 8 characters.');
-      const r=id==='c-signin'?await sb.auth.signInWithPassword({email:email.trim(),password}):await sb.auth.signUp({email:email.trim(),password});
+      const r=id==='c-signin'?await sb.auth.signInWithPassword({email:email.trim(),password}):await sb.auth.signUp({email:email.trim(),password,options:{emailRedirectTo:SITE_URL}});
       cloudAction.pass='';if(r.error)throw r.error;
       Cloud.user=r.data.user||(r.data.session&&r.data.session.user)||null;
       if(id==='c-signup'&&!r.data.session){Cloud.user=null;cloudMsg='Check your email to confirm your account, then sign in here.'}
@@ -1479,6 +1480,10 @@ async function cloudAction(id){
       const code=(($('c-code')||{}).value||'').trim();if(code.length<6)throw new Error('Enter the 6-letter code from your partner.');
       const {data,error}=await sb.rpc('join_household',{p_code:code});if(error)throw error;
       Cloud.hid=data;Cloud.pending={};Cloud.savePending();await Cloud.findHousehold();await startSync(true);cloudMsg='✓ Joined. You’re both on the same budget now.';
+    }else if(id==='c-resend'){
+      const email=(($('c-email')||{}).value||cloudAction.email||'').trim();if(!/^\S+@\S+\.\S+$/.test(email))throw new Error('Type your email in the box above first.');
+      const r=await sb.auth.resend({type:'signup',email,options:{emailRedirectTo:SITE_URL}});if(r.error)throw r.error;
+      cloudMsg='Check your email for a new confirmation link.';
     }else if(id==='c-keeplocal'){
       Cloud.choice=null;await Cloud.uploadAll();Cloud.subscribe();cloudMsg='✓ Done. Your shared budget is now this device’s budget.';
     }else if(id==='c-keepcloud'){
@@ -1486,7 +1491,7 @@ async function cloudAction(id){
     }else if(id==='c-signout'){
       await sb.auth.signOut();if(Cloud.ch)sb.removeChannel(Cloud.ch);Cloud.ch=null;try{localStorage.removeItem('wfb-hid')}catch(e){}Cloud.user=null;Cloud.hid=null;Cloud.code=null;cloudMsg='Signed out. This device keeps its own copy.';
     }
-  }catch(e){cloudMsg=(e&&e.message)||'That didn’t work. Check your connection and try again.'}
+  }catch(e){const m=(e&&e.message)||'';cloudMsg=/not confirmed/i.test(m)?'Your email isn’t confirmed yet. Click the link in the confirmation email, or tap Resend confirmation email below.':/invalid login/i.test(m)?'That email and password don’t match. Check them and try again.':m||'That didn’t work. Check your connection and try again.'}
   cloudBusy=false;openCloud();render();
 }
 // the first time a device connects, never overwrite a budget without asking: show both and let them pick
@@ -2968,7 +2973,7 @@ document.addEventListener('click',e=>{
   if(t&&t.dataset.copy){const v=t.dataset.copy,done=()=>{t.textContent='Copied';setTimeout(()=>{t.textContent='Copy link'},1500)};
     (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(v):Promise.reject()).then(done,()=>{const i=document.createElement('textarea');i.value=v;document.body.appendChild(i);i.select();try{document.execCommand('copy');done()}catch(e){}i.remove()});return}
   if(t&&t.id==='c-signout'&&t.closest('.settings')&&!$('c-email')){cloudAction('c-signout').then(()=>openSettings());return}
-  if(t&&/^c-(signin|signup|create|join|signout|keeplocal|keepcloud)$/.test(t.id)){cloudAction.email=($('c-email')||{}).value;cloudAction.pass=($('c-pass')||{}).value;cloudAction(t.id);return}
+  if(t&&/^c-(signin|signup|create|join|signout|keeplocal|keepcloud|resend)$/.test(t.id)){cloudAction.email=($('c-email')||{}).value;cloudAction.pass=($('c-pass')||{}).value;cloudAction(t.id);return}
   if(t&&(t.dataset.logstep!=null||t.dataset.paydebt)){
     // jump to This month and open Add transaction, already set to the Baby Step fund
     sheetDebt=t.dataset.paydebt||null;const d=sheetDebt&&plan.debts.find(x=>x.id===sheetDebt);
