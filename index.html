@@ -1025,6 +1025,13 @@ button.fund-badge:hover{transform:scale(1.04);background:var(--accent-hover)}
 #settings-sheet .field input,#c-code{height:var(--control);width:100%;padding:0 12px;border-radius:10px;border:1px solid var(--field-line);background:var(--field);color:var(--ink);font-size:15px}
 #settings-sheet .field input:focus,#c-code:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px var(--ring)}
 /* Settings › Shared budget */
+.set-btn{min-width:96px;flex:none}
+.set-row>div{min-width:0}
+.set-row>div span{display:block}
+a.set-row.set-link{color:inherit;text-decoration:none;cursor:pointer;transition:box-shadow .2s var(--ease),background-color .2s var(--ease)}
+a.set-row.set-link:hover{background:var(--fill);box-shadow:0 0 0 8px var(--fill);border-radius:2px}
+.set-group a.set-link+a.set-link,.set-group .set-row+a.set-link{border-top:.5px solid var(--line)}
+.set-arrow{flex:none;width:28px;height:28px;margin-right:-6px;border-radius:50%;display:grid;place-items:center;color:var(--accent);font-size:14px;font-weight:600}
 .set-explain{margin:0 0 6px}
 .set-code{font-size:20px;letter-spacing:.14em;font-variant-numeric:tabular-nums}
 .set-links{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
@@ -2759,13 +2766,19 @@ function sharedSettingsHTML(row){
   const n=Object.keys(Cloud.pending||{}).length,ago=t=>{if(!t)return '';const m=Math.round((Date.now()-t)/60000);return m<1?'just now':m<60?`${m} min ago`:`${Math.round(m/60)} hr ago`};
   const status=!Cloud.user?'Not signed in':!Cloud.hid?'Signed in, not sharing yet':!navigator.onLine?`Offline${n?` · ${plural(n,'change')} waiting to upload`:''}`:n?`${plural(n,'change')} waiting to upload`:`✓ Up to date${Cloud.last?` · synced ${ago(Cloud.last)}`:''}`;
   const link=(href,label)=>`<a class="textbtn subtle" href="${href}" target="_blank" rel="noopener">${label} ↗</a>`;
+  const linkRow=(href,title,sub)=>`<a class="set-row set-link" href="${href}" target="_blank" rel="noopener"><div><b>${title}</b><span>${sub}</span></div><span class="set-arrow" aria-hidden="true">↗</span></a>`;
+  const who=esc(personName('b'));
   return `<div class="set-group"><h3>Shared budget</h3>
-    <p class="sub set-explain">Your budget is saved online so you and ${esc(personName('b'))} see the same numbers. This Mac also keeps its own copy, so it works offline and catches up when you’re back online.</p>
-    ${row('Account',Cloud.user?esc(Cloud.user.email):'Sign in to share your budget',Cloud.user?`<button class="textbtn subtle" id="c-signout">Sign out</button>`:`<button class="textbtn primary" data-opencloud>Sign in</button>`)}
-    ${row('Status',status,Cloud.on?`<button class="textbtn subtle" data-syncnow>Sync now</button>`:Cloud.user?`<button class="textbtn primary" data-opencloud>Set up</button>`:'')}
-    ${Cloud.code?row('Invite code',`${esc(personName('b'))} enters this once, after signing in, to join your budget`,`<b class="set-code">${esc(Cloud.code)}</b>`):''}
-    ${row(`${esc(personName('b'))}’s app`,`On Windows: open this link in Edge, then ⋯ → Apps → Install this site as an app`,`<span class="set-links"><button class="textbtn subtle" data-copy="${SITE_URL}">Copy link</button>${link(SITE_URL,'Open')}</span>`)}
-    ${row('Where it lives','Your budget data is in Supabase. The app’s Windows version is published on GitHub. You never need to open these.',`<span class="set-links">${link('https://supabase.com/dashboard/project/nodladyhgqkwnnvfyagt/editor','Supabase')}${link('https://github.com/kurtistwess-creator/wess-budget','GitHub')}</span>`)}
+    <p class="sub set-explain">You and ${who} share one budget. This Mac keeps its own copy too, so it works offline and catches up when you’re back online.</p>
+    ${row('Account',Cloud.user?esc(Cloud.user.email):'Not signed in',Cloud.user?`<button class="textbtn subtle set-btn" id="c-signout">Sign out</button>`:`<button class="textbtn primary set-btn" data-opencloud>Sign in</button>`)}
+    ${Cloud.user?row('Status',status,Cloud.on?`<button class="textbtn subtle set-btn" data-syncnow>Sync now</button>`:`<button class="textbtn primary set-btn" data-opencloud>Set up</button>`):''}
+    ${Cloud.code?row('Invite code',`${who} enters this once to join`,`<b class="set-code">${esc(Cloud.code)}</b>`):''}
+  </div>
+  <div class="set-group"><h3>${who}’s app</h3>
+    ${row('Link for Windows',`In Edge: ⋯ › Apps › Install this site as an app`,`<button class="textbtn subtle set-btn" data-copy="${SITE_URL}">Copy link</button>`)}
+    ${linkRow(SITE_URL,`Open ${who}’s app`,'kurtistwess-creator.github.io/wess-budget')}
+    ${linkRow('https://supabase.com/dashboard/project/nodladyhgqkwnnvfyagt/editor','Where your budget is saved','Supabase · you never need to open this')}
+    ${linkRow('https://github.com/kurtistwess-creator/wess-budget','Where the Windows version lives','GitHub · you never need to open this')}
   </div>`;
 }
 function settingsHTML(){
@@ -2786,8 +2799,8 @@ function settingsHTML(){
       ${row('Lock with Touch ID',mac?(caps.touchID?'Asks when the app opens, and after 5 minutes away':'This Mac can’t use Touch ID or a password lock'):'Works in the Mac app',sw('data-pref="touchID"',mac&&pr.touchID,!mac||!caps.touchID))}</div>
     <div class="set-group"><h3>Backups</h3>
       ${row('Back up every day',mac?`To iCloud Drive › Wess Family Budget Backups${caps.lastBackup?` · last ${esc(caps.lastBackup)}`:''}`:'Works in the Mac app',sw('data-pref="backup"',mac&&pr.backup,!mac))}
-      ${mac?row('Back up now','',`<button class="textbtn" id="backup-now">Back up</button>`):''}
-      ${mac?row('Export transactions','A spreadsheet in your Downloads folder',`<button class="textbtn" id="export-csv">Export</button>`):''}</div>`;
+      ${mac?row('Back up now','',`<button class="textbtn subtle set-btn" id="backup-now">Back up</button>`):''}
+      ${mac?row('Export transactions','A spreadsheet in your Downloads folder',`<button class="textbtn subtle set-btn" id="export-csv">Export</button>`):''}</div>`;
 }
 const ordinal=n=>n+(n%10===1&&n!==11?'st':n%10===2&&n!==12?'nd':n%10===3&&n!==13?'rd':'th');
 function openSettings(){const w=$('settings-sheet');w.querySelector('.sheet').innerHTML=settingsHTML();w.classList.add('open');document.body.classList.add('sheet-lock')}
