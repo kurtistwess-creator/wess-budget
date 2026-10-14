@@ -1029,6 +1029,9 @@ button.fund-badge:hover{transform:scale(1.04);background:var(--accent-hover)}
 .set-code{font-size:20px;letter-spacing:.14em;font-variant-numeric:tabular-nums}
 .set-links{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 a.textbtn{text-decoration:none}
+/* Mortgage › one-time payments: date, amount and a round × to undo, lined up like every other list */
+.mp-row{grid-template-columns:minmax(0,1fr) auto minmax(40px,auto)!important}
+.mp-row .amt{font-weight:600;font-variant-numeric:tabular-nums}
 /* Net worth › What you own: every row the same grid, with a round × and a round ＋, all 40px */
 .nw-own .pline{grid-template-columns:minmax(0,1fr) 120px 40px;align-items:center}
 .nw-own .pline:has(.b2-del.confirm){grid-template-columns:minmax(0,1fr) 120px auto}
@@ -1470,10 +1473,12 @@ async function cloudAction(id){
   cloudBusy=false;openCloud();render();
 }
 // signed in on a device that already belongs to a shared budget: pull it down (or push this device's copy if the cloud is empty)
+// one-time mortgage payments used to be logged as spending too; take those back out (the payment itself stays on the Mortgage card)
+function cleanOldPayments(){for(const [ym,m] of Object.entries(months)){const n=(m.tx||[]).length;m.tx=(m.tx||[]).filter(t=>!(t.cat==='mortextra'&&t.desc==='Extra mortgage payment'));if(m.tx.length!==n)saveMonth(ym)}}
 async function startSync(replace){
   if(!replace&&Object.keys(Cloud.pending).length&&!(await Cloud.flush())){Cloud.subscribe();return}
   const d=await Cloud.loadAll();
-  if(d.plan){plan=migrate(d.plan);months=d.months||{};Store.writeLocal('plan',plan);for(const [ym,m] of Object.entries(months))Store.writeLocal('month-'+ym,m)}
+  if(d.plan){plan=migrate(d.plan);months=d.months||{};Store.writeLocal('plan',plan);for(const [ym,m] of Object.entries(months))Store.writeLocal('month-'+ym,m);cleanOldPayments()}
   else await Cloud.uploadAll();
   Cloud.subscribe();curMonth=thisPeriod();
 }
@@ -1558,7 +1563,7 @@ function applyStepMoney(tx){
     if(num(d.balance)<=0)setTimeout(()=>debtCelebration(d),300)}
   else if(g.type==='retire'){plan.nw.retirement=r2(num(plan.nw.retirement)+a);note=`${fmt0.format(a)} added to retirement`}
   else if(g.type==='college'){plan.college.saved=r2(num(plan.college.saved)+a);note=`${fmt0.format(a)} added to college savings`}
-  else if(g.type==='house'){const bal=mortBalance(),paid=Math.min(a,bal);plan.mortgageBalance=r2(bal-paid);plan.mortgageAsOf=thisPeriod();plan.mortgagePayments.push({id:uid('mp'),date:tx.date,amount:paid});g.amt=paid;note=`${fmt0.format(paid)} paid toward the house`}
+  else if(g.type==='house'){const bal=mortBalance(),paid=Math.min(a,bal);plan.mortgageBalance=r2(bal-paid);plan.mortgageAsOf=thisPeriod();plan.mortgagePayments.push({id:uid('mp'),date:tx.date,amount:paid,tx:tx.id});g.amt=paid;note=`${fmt0.format(paid)} paid toward the house`}
   tx.step={type:g.type,...(g.id?{id:g.id}:{}),amt:g.amt!=null?g.amt:a};sheetDebt=null;savePlan(0);return note;
 }
 function undoStepMoney(tx){
@@ -1567,7 +1572,7 @@ function undoStepMoney(tx){
   else if(st.type==='debt'){const d=plan.debts.find(x=>x.id===st.id);if(d)d.balance=r2(num(d.balance)+a)}
   else if(st.type==='retire')plan.nw.retirement=Math.max(0,r2(num(plan.nw.retirement)-a));
   else if(st.type==='college')plan.college.saved=Math.max(0,r2(num(plan.college.saved)-a));
-  else if(st.type==='house'){plan.mortgageBalance=r2(mortBalance()+a);plan.mortgageAsOf=thisPeriod();const k=plan.mortgagePayments.findIndex(p=>p.date===tx.date&&num(p.amount)===a);if(k>=0)plan.mortgagePayments.splice(k,1)}
+  else if(st.type==='house'){plan.mortgageBalance=r2(mortBalance()+a);plan.mortgageAsOf=thisPeriod();const k=plan.mortgagePayments.findIndex(p=>p.tx===tx.id||(p.date===tx.date&&num(p.amount)===a));if(k>=0)plan.mortgagePayments.splice(k,1)}
   savePlan(0);
 }
 // how far along the current step is, for the progress ring on This month
@@ -2089,16 +2094,17 @@ function mortBalanceCard(){
     <p class="sub">${po.line}</p></section>`;
 }
 function mortPayCard(){
-  const pays=(plan.mortgagePayments||[]).slice(-4).reverse();
+  const pays=(plan.mortgagePayments||[]).slice(-6).reverse();
   return `<section class="panel" id="mort-pay-card"><h2>Pay more toward the house</h2>
     <div class="pline"><div class="nm"><label for="mort-extra-m">Extra every month</label><div class="note" style="display:block">Becomes an “Extra toward the house” line in your budget</div></div><input id="mort-extra-m" class="money" inputmode="decimal" data-k="extraMortgage" value="${num(plan.extraMortgage).toFixed(2)}"><span></span></div>
     <div class="pline"><div class="nm"><label for="px-amt">One-time payment</label><div class="note" style="display:block">A bonus, tax refund or anything extra</div></div><input id="px-amt" class="money" inputmode="decimal" placeholder="0.00"><span></span></div>
     <div><button class="textbtn primary" id="pay-extra">Pay extra</button></div>
     <p class="formmsg" id="px-msg" role="status"></p>
-    ${pays.length?`<ul class="entries">${pays.map(x=>`<li class="entry" style="grid-template-columns:4.2em minmax(0,1fr) auto"><span class="d">${shortDate(new Date(x.date+'T12:00'))}</span><span>Extra payment</span><span class="amt good">−${fmt.format(num(x.amount))}</span></li>`).join('')}</ul>`:''}
+    ${pays.length?`<div class="mp-list"><h3 class="mort-h" style="margin-top:4px">One-time payments</h3>${pays.map(x=>{const c=pendingDelete==='mp:'+x.id;return `<div class="pline mp-row"><div class="nm"><span>${x.tx?'Baby Step payment':'Extra payment'}</span><div class="note" style="display:block">${shortDate(new Date(x.date+'T12:00'))}</div></div><span class="amt good">−${fmt.format(num(x.amount))}</span><button class="del ${c?'confirm':''}" data-delpay="${x.id}" aria-label="Undo this ${fmt0.format(num(x.amount))} payment" title="Undo">${c?'Undo?':'×'}</button></div>`}).join('')}</div>`:''}
   </section>`;
 }
-// a one-time extra payment: lowers the balance today and logs the payment in This month
+// a one-time extra payment: lowers the balance today. It's money from outside the monthly budget (a bonus, a refund),
+// so it isn't logged as spending in This month; it's listed on this card, where it can be undone.
 function payExtra(){
   const amt=r2(num($('px-amt').value)),msg=$('px-msg'),bal=mortBalance(),ex=num(plan.extraMortgage);
   if(amt<=0){msg.className='formmsg err';msg.textContent='Enter how much extra you’re paying, like 500.';$('px-amt').focus();return}
@@ -2106,8 +2112,7 @@ function payExtra(){
   const before=amortize(bal,ex),after=amortize(bal-amt,ex);
   plan.mortgageBalance=r2(bal-amt);plan.mortgageAsOf=thisPeriod();
   plan.mortgagePayments.push({id:uid('mp'),date:todayISO(),amount:amt});
-  const ym=thisPeriod();months[ym]=months[ym]||{tx:[]};months[ym].tx.push({id:uid('t'),date:todayISO(),kind:'expense',cat:'mortextra',amount:amt,desc:'Extra mortgage payment',created:Date.now()});
-  saveMonth(ym);savePlan(0);render();
+  savePlan(0);render();
   if(plan.mortgageBalance<=0)celebrate('The house is paid off!','No more mortgage payments. Mark Step 6 done and keep building wealth.');
   else if(before.months!==Infinity&&after.months!==Infinity)toast(`Paid ${fmt0.format(amt)} extra · ${before.months-after.months>0?duration(before.months-after.months)+' sooner, ':''}${fmt0.format(before.interest-after.interest)} less interest`);
   else toast(`Paid ${fmt0.format(amt)} extra`);
@@ -2879,6 +2884,11 @@ document.addEventListener('click',e=>{
   if(t&&t.dataset.scan!=null){openSheet();const f=$('scan-in');f&&f.click();return}
   if(t&&t.dataset.plansec){setPlanSec(t.dataset.plansec);return}
   if(t&&t.dataset.opensettings!=null){openSettings();return}
+  if(t&&t.dataset.delpay){const id=t.dataset.delpay;if(pendingDelete!=='mp:'+id){pendingDelete='mp:'+id;render();return}
+    pendingDelete=null;const p=(plan.mortgagePayments||[]).find(x=>x.id===id);
+    if(p){plan.mortgagePayments=plan.mortgagePayments.filter(x=>x.id!==id);plan.mortgageBalance=r2(mortBalance()+num(p.amount));plan.mortgageAsOf=thisPeriod();
+      if(p.tx)for(const [ym,m] of Object.entries(months)){const before=(m.tx||[]).length;m.tx=(m.tx||[]).filter(x=>x.id!==p.tx);if(m.tx.length!==before)saveMonth(ym)}
+      savePlan(0);render();toast(`Undid the ${fmt0.format(num(p.amount))} payment · balance back to ${fmt0.format(mortBalance())}`)}return}
   if(t&&t.dataset.opencloud!=null){cloudMsg='';openCloud();return}
   if(t&&t.dataset.syncnow!=null){t.textContent='Syncing…';Cloud.resync().then(()=>{toast(Object.keys(Cloud.pending).length?'Still offline. Changes are saved on this Mac.':'Up to date');openSettings()});return}
   if(t&&t.dataset.copy){const v=t.dataset.copy,done=()=>{t.textContent='Copied';setTimeout(()=>{t.textContent='Copy link'},1500)};
@@ -2955,7 +2965,7 @@ document.addEventListener('click',e=>{
     plan.debts=plan.debts.filter(d=>!d.example);plan.jars=plan.jars.filter(j=>!j.example);savePlan(0);
     for(const [ym,m] of Object.entries(months)){if((m.tx||[]).some(x=>x.example)){m.tx=m.tx.filter(x=>!x.example);saveMonth(ym)}}
     render();return}
-  if(pendingDelete&&!(t&&(t.dataset.del||t.dataset.deljar||t.dataset.delgroup||t.dataset.delbill||t.dataset.delacct))){pendingDelete=null;render()}
+  if(pendingDelete&&!(t&&(t.dataset.del||t.dataset.deljar||t.dataset.delgroup||t.dataset.delbill||t.dataset.delacct||t.dataset.delpay))){pendingDelete=null;render()}
 });
 
 /* ================= boot ================= */
@@ -2992,6 +3002,7 @@ async function boot(){
     else{try{sampler=window.claude&&window.claude.use?await window.claude.use('sample'):null}catch(e){sampler=null}scanReady=!!sampler}const d=await Store.load();months=d.months||{};
     if(d.plan){plan=migrate(d.plan);if(colorsAdded)savePlan(0)}
     else{plan=defaultPlan();const ym=todayISO().slice(0,7);months[ym]={tx:exampleTx(ym)};savePlan(0);saveMonth(ym)}
+    cleanOldPayments();
     if(Store.mode==='native'){try{Store.caps=await Store.native.postMessage({op:'capabilities'})||{}}catch(e){Store.caps={}}}
     await Cloud.init();
     if(Cloud.on){try{await startSync(false)}catch(e){showError('Couldn’t reach your shared budget, so this shows the copy saved on this device.')}}
