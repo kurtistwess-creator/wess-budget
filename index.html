@@ -1371,7 +1371,7 @@ const savePlan=(d=400)=>Store.save('plan',plan,d);
 const CLOUD={url:'https://nodladyhgqkwnnvfyagt.supabase.co',key:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vZGxhZHloZ3Frd25udmZ5YWd0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE5NzczOTYsImV4cCI6MjEwNzU1MzM5Nn0.lihFgYoolzZfBjivkEW39EyjuXMNhurJ2JLaF9h2-3g'};
 const Cloud={sb:null,user:null,hid:null,code:null,pending:{},
   get ready(){return !!this.sb},
-  get on(){return !!(this.sb&&this.user&&this.hid)},
+  get on(){return !!(this.sb&&this.user&&this.hid&&!this.choice)},
   async init(){
     if(!CLOUD.url||!CLOUD.key||(window.claude&&window.claude.use))return;
     // the Mac app carries its own copy; the website loads the same version from the CDN
@@ -1382,7 +1382,7 @@ const Cloud={sb:null,user:null,hid:null,code:null,pending:{},
     try{this.pending=JSON.parse(localStorage.getItem('wfb-pending')||'{}')}catch(e){this.pending={}}
     try{const {data}=await this.sb.auth.getSession();this.user=data.session?data.session.user:null}catch(e){}
     if(this.user){
-      try{const c=JSON.parse(localStorage.getItem('wfb-hid')||'null');if(c&&c.u===this.user.id){this.hid=c.hid;this.code=c.code}}catch(e){}
+      try{const c=JSON.parse(localStorage.getItem('wfb-hid')||'null');if(c&&c.u===this.user.id){this.hid=c.hid;this.code=c.code;this.wasLinked=true}}catch(e){}
       try{await this.findHousehold()}catch(e){}
     }
     // back online: send what changed here first, then pick up what changed on the other computer
@@ -1390,11 +1390,11 @@ const Cloud={sb:null,user:null,hid:null,code:null,pending:{},
   },
   async findHousehold(){
     const {data}=await this.sb.from('household_members').select('household_id, households(invite_code,name)').eq('user_id',this.user.id).limit(1);
-    if(data&&data[0]){this.hid=data[0].household_id;this.code=data[0].households&&data[0].households.invite_code;try{localStorage.setItem('wfb-hid',JSON.stringify({u:this.user.id,hid:this.hid,code:this.code}))}catch(e){}}
+    if(data&&data[0]){this.hid=data[0].household_id;this.code=data[0].households&&data[0].households.invite_code}
   },
   async loadAll(){
     const {data,error}=await this.sb.from('budget_kv').select('key,value').eq('household_id',this.hid);if(error)throw error;this.last=Date.now();
-    const out={plan:null,months:{}};for(const r of data){if(r.key==='plan')out.plan=r.value;else if(r.key.startsWith('month-'))out.months[r.key.slice(6)]=r.value}
+    const out={plan:null,months:{}};for(const r of data){if(r.key==='plan')out.plan=r.value;else if(/^month[:-]/.test(r.key))out.months[r.key.slice(6)]=r.value}
     return out;
   },
   async put(key,value){
@@ -1408,20 +1408,22 @@ const Cloud={sb:null,user:null,hid:null,code:null,pending:{},
     if(!this.on||this.syncing)return;this.syncing=true;
     try{if(await this.flush()){const d=await this.loadAll();
       if(d.plan){plan=migrate(d.plan);Store.writeLocal('plan',plan)}
-      for(const [ym,m] of Object.entries(d.months||{})){months[ym]=m;Store.writeLocal('month-'+ym,m)}
+      for(const [ym,m] of Object.entries(d.months||{})){months[ym]=m;Store.writeLocal('month:'+ym,m)}
       if(!this.ch)this.subscribe();
       const a=document.activeElement;if(a&&a.matches&&a.matches('input,select,textarea'))this.redraw=true;else render()}}
     catch(e){}finally{this.syncing=false}
   },
-  async uploadAll(){await this.put('plan',plan);for(const [ym,m] of Object.entries(months))await this.put('month-'+ym,m)},
+  async uploadAll(){await this.put('plan',plan);for(const [ym,m] of Object.entries(months))await this.put('month:'+ym,m)},
   subscribe(){
+    // syncing is on: from now on this device is linked to the shared budget
+    try{localStorage.setItem('wfb-hid',JSON.stringify({u:this.user.id,hid:this.hid,code:this.code}))}catch(e){}this.wasLinked=true;
     if(this.ch)this.sb.removeChannel(this.ch);
     this.ch=this.sb.channel('kv-'+this.hid).on('postgres_changes',{event:'*',schema:'public',table:'budget_kv',filter:'household_id=eq.'+this.hid},p=>this.remote(p)).subscribe();
   },
   // the other person saved something: take it, keep this device's copy in step, and redraw unless you're mid-typing
   remote(p){
     const r=p.new;if(!r||!r.key||r.updated_by===this.user.id)return;
-    if(r.key==='plan')plan=migrate(r.value);else if(r.key.startsWith('month-'))months[r.key.slice(6)]=r.value;else return;
+    if(r.key==='plan')plan=migrate(r.value);else if(/^month[:-]/.test(r.key))months[r.key.slice(6)]=r.value;else return;
     Store.writeLocal(r.key,r.value);
     const a=document.activeElement;if(a&&a.matches&&a.matches('input,select,textarea')&&!a.closest('#settings-sheet')){this.redraw=true;return}
     render();
@@ -1434,6 +1436,9 @@ let cloudMsg='',cloudBusy=false;
 function cloudHTML(){
   const head=`<div class="sheet-head"><h2 id="settings-title">Shared budget</h2><button class="iconbtn" data-close-settings aria-label="Close">×</button></div>`;
   const msg=`<p class="formmsg ${/^(✓|Check)/.test(cloudMsg)?'':'err'}" role="status">${esc(cloudMsg)}</p>`;
+  if(Cloud.choice)return `${head}<p class="sub">This device and your shared budget both have a budget. Which one should you both use? The other one is replaced.</p>
+    <div class="set-group"><div class="set-row"><div><b>This ${Store.mode==='native'?'Mac':'device'}’s budget</b><span>${budgetSummary(plan,months)}</span></div><button class="textbtn primary" id="c-keeplocal">Use this one</button></div>
+    <div class="set-row"><div><b>The shared budget</b><span>${budgetSummary(Cloud.choice.plan,Cloud.choice.months)}</span></div><button class="textbtn subtle" id="c-keepcloud">Use this one</button></div></div>${msg}`;
   if(!Cloud.user)return `${head}<p class="sub">Sign in so you and ${esc(personName('b'))} share one budget across your Mac and her Windows computer. Changes show up on both, live.</p>
     <div class="set-group"><div class="field"><label for="c-email">Email</label><input id="c-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
     <div class="field"><label for="c-pass">Password</label><input id="c-pass" type="password" autocomplete="current-password" placeholder="At least 8 characters"></div></div>
@@ -1458,7 +1463,8 @@ async function cloudAction(id){
       cloudAction.pass='';if(r.error)throw r.error;
       Cloud.user=r.data.user||(r.data.session&&r.data.session.user)||null;
       if(id==='c-signup'&&!r.data.session){Cloud.user=null;cloudMsg='Check your email to confirm your account, then sign in here.'}
-      else if(Cloud.user){await Cloud.findHousehold();if(Cloud.hid)await startSync(false)}
+      else if(Cloud.user){let linked=false;try{const c=JSON.parse(localStorage.getItem('wfb-hid')||'null');linked=!!(c&&c.u===Cloud.user.id)}catch(e){}
+        await Cloud.findHousehold();if(Cloud.hid){if(linked)await startSync(false);else{await linkDevice();if(Cloud.choice){cloudBusy=false;openCloud();return}}}}
     }else if(id==='c-create'){
       const {data,error}=await sb.rpc('create_household',{p_name:'Wess family budget'});if(error)throw error;
       Cloud.hid=data[0].id;Cloud.code=data[0].invite_code;await Cloud.uploadAll();Cloud.subscribe();cloudMsg='✓ Your budget is shared. Give your partner the invite code.';
@@ -1466,11 +1472,27 @@ async function cloudAction(id){
       const code=(($('c-code')||{}).value||'').trim();if(code.length<6)throw new Error('Enter the 6-letter code from your partner.');
       const {data,error}=await sb.rpc('join_household',{p_code:code});if(error)throw error;
       Cloud.hid=data;Cloud.pending={};Cloud.savePending();await Cloud.findHousehold();await startSync(true);cloudMsg='✓ Joined. You’re both on the same budget now.';
+    }else if(id==='c-keeplocal'){
+      Cloud.choice=null;await Cloud.uploadAll();Cloud.subscribe();cloudMsg='✓ Done. Your shared budget is now this device’s budget.';
+    }else if(id==='c-keepcloud'){
+      const d=Cloud.choice;Cloud.choice=null;plan=migrate(d.plan);months=d.months||{};Store.writeLocal('plan',plan);for(const [ym,m] of Object.entries(months))Store.writeLocal('month:'+ym,m);cleanOldPayments();Cloud.subscribe();curMonth=thisPeriod();cloudMsg='✓ Done. This device now shows the shared budget.';
     }else if(id==='c-signout'){
       await sb.auth.signOut();if(Cloud.ch)sb.removeChannel(Cloud.ch);Cloud.ch=null;try{localStorage.removeItem('wfb-hid')}catch(e){}Cloud.user=null;Cloud.hid=null;Cloud.code=null;cloudMsg='Signed out. This device keeps its own copy.';
     }
   }catch(e){cloudMsg=(e&&e.message)||'That didn’t work. Check your connection and try again.'}
   cloudBusy=false;openCloud();render();
+}
+// the first time a device connects, never overwrite a budget without asking: show both and let them pick
+const budgetSummary=(p,ms)=>{const tx=Object.values(ms||{}).reduce((a,m)=>a+((m&&m.tx)||[]).filter(t=>!t.example).length,0),ex=Object.values(ms||{}).some(m=>((m&&m.tx)||[]).some(t=>t.example));
+  return `${fmt0.format(num(p&&p.takeHome))} take-home · ${plural(tx,'transaction')}${ex?' · has the starter examples':''}`};
+// the same budget on both sides (same income, extra, lines and transactions): just link, nothing to choose
+function sameBudget(d){const k=p=>JSON.stringify([num(p&&p.takeHome),num(p&&p.extraMortgage),((p&&p.lines)||[]).map(l=>[l.id,num(l.amt)])]);
+  return k(d.plan)===k(plan)&&budgetSummary(d.plan,d.months)===budgetSummary(plan,months)}
+async function linkDevice(){
+  const d=await Cloud.loadAll();
+  if(!d.plan){await Cloud.uploadAll();Cloud.subscribe();return}
+  if(sameBudget(d)){Cloud.subscribe();return}
+  Cloud.choice=d;openCloud();
 }
 // signed in on a device that already belongs to a shared budget: pull it down (or push this device's copy if the cloud is empty)
 // one-time mortgage payments used to be logged as spending too; take those back out (the payment itself stays on the Mortgage card)
@@ -1478,7 +1500,7 @@ function cleanOldPayments(){for(const [ym,m] of Object.entries(months)){const n=
 async function startSync(replace){
   if(!replace&&Object.keys(Cloud.pending).length&&!(await Cloud.flush())){Cloud.subscribe();return}
   const d=await Cloud.loadAll();
-  if(d.plan){plan=migrate(d.plan);months=d.months||{};Store.writeLocal('plan',plan);for(const [ym,m] of Object.entries(months))Store.writeLocal('month-'+ym,m);cleanOldPayments()}
+  if(d.plan){plan=migrate(d.plan);months=d.months||{};Store.writeLocal('plan',plan);for(const [ym,m] of Object.entries(months))Store.writeLocal('month:'+ym,m);cleanOldPayments()}
   else await Cloud.uploadAll();
   Cloud.subscribe();curMonth=thisPeriod();
 }
@@ -2933,7 +2955,7 @@ document.addEventListener('click',e=>{
   if(t&&t.dataset.copy){const v=t.dataset.copy,done=()=>{t.textContent='Copied';setTimeout(()=>{t.textContent='Copy link'},1500)};
     (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(v):Promise.reject()).then(done,()=>{const i=document.createElement('textarea');i.value=v;document.body.appendChild(i);i.select();try{document.execCommand('copy');done()}catch(e){}i.remove()});return}
   if(t&&t.id==='c-signout'&&t.closest('.settings')&&!$('c-email')){cloudAction('c-signout').then(()=>openSettings());return}
-  if(t&&/^c-(signin|signup|create|join|signout)$/.test(t.id)){cloudAction.email=($('c-email')||{}).value;cloudAction.pass=($('c-pass')||{}).value;cloudAction(t.id);return}
+  if(t&&/^c-(signin|signup|create|join|signout|keeplocal|keepcloud)$/.test(t.id)){cloudAction.email=($('c-email')||{}).value;cloudAction.pass=($('c-pass')||{}).value;cloudAction(t.id);return}
   if(t&&(t.dataset.logstep!=null||t.dataset.paydebt)){
     // jump to This month and open Add transaction, already set to the Baby Step fund
     sheetDebt=t.dataset.paydebt||null;const d=sheetDebt&&plan.debts.find(x=>x.id===sheetDebt);
@@ -3044,7 +3066,7 @@ async function boot(){
     cleanOldPayments();
     if(Store.mode==='native'){try{Store.caps=await Store.native.postMessage({op:'capabilities'})||{}}catch(e){Store.caps={}}}
     await Cloud.init();
-    if(Cloud.on){try{await startSync(false)}catch(e){showError('Couldn’t reach your shared budget, so this shows the copy saved on this device.')}}
+    if(Cloud.on){try{if(Cloud.wasLinked)await startSync(false);else{const d=await Cloud.loadAll();if(d.plan&&!sameBudget(d))Cloud.choice=d;else if(d.plan)Cloud.subscribe();else{await Cloud.uploadAll();Cloud.subscribe()}}}catch(e){showError('Couldn’t reach your shared budget, so this shows the copy saved on this device.')}}
   }catch(e){
     Store.mode='local';const d=await Store.load();months=d.months||{};plan=d.plan?migrate(d.plan):defaultPlan();
     showError('Couldn’t reach your saved budget, so this session saves in this browser only.');
@@ -3054,6 +3076,7 @@ async function boot(){
   render(true);
   // arriving from the confirmation email: say so plainly
   if(/type=signup|type=email/.test(location.hash)){history.replaceState(null,'',location.pathname);cloudMsg='✓ Email confirmed. You can sign in now (on the Mac app, click Sign in).';try{localStorage.setItem(LS+'-cloud-offered','1')}catch(e){}setTimeout(openCloud,600)}
+  if(Cloud.choice)setTimeout(openCloud,700);
   // the first time on a device that can share, offer to sign in
   if(Cloud.ready&&!Cloud.on){let seen=false;try{seen=localStorage.getItem(LS+'-cloud-offered')}catch(e){}if(!seen){try{localStorage.setItem(LS+'-cloud-offered','1')}catch(e){}setTimeout(openCloud,900)}}
 }
