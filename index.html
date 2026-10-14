@@ -1453,7 +1453,7 @@ function cloudHTML(){
     <p class="sub">Didn’t get the confirmation email, or the link didn’t work? Type your email above, then <button class="from" id="c-resend">Resend confirmation email</button></p>${msg}`;
   if(!Cloud.hid)return `${head}<p class="sub">Signed in as <b>${esc(Cloud.user.email)}</b>. Start your shared budget, or join the one your partner started.</p>
     <div class="set-group"><h3>Start ours</h3><p class="sub">Uploads the budget on this device so you can both use it.</p><div><button class="textbtn primary" id="c-create" ${cloudBusy?'disabled':''}>Start our shared budget</button></div></div>
-    <div class="set-group"><h3>Join with a code</h3><div class="inc-row" style="grid-template-columns:minmax(0,1fr) auto"><input id="c-code" maxlength="6" placeholder="ABC123" style="text-transform:uppercase" aria-label="Invite code"><button class="textbtn" id="c-join" ${cloudBusy?'disabled':''}>Join</button></div><p class="sub">This replaces the budget on this device with the shared one.</p></div>
+    <div class="set-group"><h3>Join with a code</h3><div class="inc-row" style="grid-template-columns:minmax(0,1fr) auto"><input id="c-code" maxlength="6" placeholder="8C814A" style="text-transform:uppercase" aria-label="Invite code" value="${esc(cloudAction.code||'')}"><button class="textbtn" id="c-join" ${cloudBusy?'disabled':''}>Join</button></div><p class="sub">This replaces the budget on this device with the shared one.</p></div>
     <div class="step-actions"><button class="textbtn subtle" id="c-signout">Sign out</button></div>${msg}`;
   return `${head}<div class="set-group"><div class="set-row"><div><b>Shared budget is on</b><span>Signed in as ${esc(Cloud.user.email)}</span></div><span class="b2-st paid">✓ Syncing</span></div>
     <div class="set-row"><div><b>Invite code</b><span>Your partner signs in on her computer and enters this code</span></div><b style="font-size:20px;letter-spacing:.12em">${esc(Cloud.code||'')}</b></div></div>
@@ -1477,7 +1477,7 @@ async function cloudAction(id){
       const {data,error}=await sb.rpc('create_household',{p_name:'Wess family budget'});if(error)throw error;
       Cloud.hid=data[0].id;Cloud.code=data[0].invite_code;await Cloud.uploadAll();Cloud.subscribe();cloudMsg='✓ Your budget is shared. Give your partner the invite code.';
     }else if(id==='c-join'){
-      const code=(($('c-code')||{}).value||'').trim();if(code.length<6)throw new Error('Enter the 6-letter code from your partner.');
+      const code=(cloudAction.code||($('c-code')||{}).value||'').replace(/\s+/g,'').toUpperCase();if(code.length!==6)throw new Error('Enter the 6-character code from your partner, like 8C814A.');
       const {data,error}=await sb.rpc('join_household',{p_code:code});if(error)throw error;
       Cloud.hid=data;Cloud.pending={};Cloud.savePending();await Cloud.findHousehold();await startSync(true);cloudMsg='✓ Joined. You’re both on the same budget now.';
     }else if(id==='c-resend'){
@@ -2973,7 +2973,7 @@ document.addEventListener('click',e=>{
   if(t&&t.dataset.copy){const v=t.dataset.copy,done=()=>{t.textContent='Copied';setTimeout(()=>{t.textContent='Copy link'},1500)};
     (navigator.clipboard&&navigator.clipboard.writeText?navigator.clipboard.writeText(v):Promise.reject()).then(done,()=>{const i=document.createElement('textarea');i.value=v;document.body.appendChild(i);i.select();try{document.execCommand('copy');done()}catch(e){}i.remove()});return}
   if(t&&t.id==='c-signout'&&t.closest('.settings')&&!$('c-email')){cloudAction('c-signout').then(()=>openSettings());return}
-  if(t&&/^c-(signin|signup|create|join|signout|keeplocal|keepcloud|resend)$/.test(t.id)){cloudAction.email=($('c-email')||{}).value;cloudAction.pass=($('c-pass')||{}).value;cloudAction(t.id);return}
+  if(t&&/^c-(signin|signup|create|join|signout|keeplocal|keepcloud|resend)$/.test(t.id)){cloudAction.email=($('c-email')||{}).value;cloudAction.pass=($('c-pass')||{}).value;cloudAction.code=($('c-code')||{}).value;cloudAction(t.id);return}
   if(t&&(t.dataset.logstep!=null||t.dataset.paydebt)){
     // jump to This month and open Add transaction, already set to the Baby Step fund
     sheetDebt=t.dataset.paydebt||null;const d=sheetDebt&&plan.debts.find(x=>x.id===sheetDebt);
