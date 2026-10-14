@@ -1724,7 +1724,7 @@ function paintPlanFloat(){
 function paintDock(){$('dock').hidden=true;document.body.classList.remove('has-dock')}
 /* a glass confirmation that drops in under the top bar */
 let toastTimer=null;
-function toast(msg){const t=$('toast');t.innerHTML=`<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="var(--bar-good)"/><path d="M6 10.4l2.6 2.6L14 7.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>${esc(msg)}`;
+function toast(msg){toast.n=(toast.n||0)+1;const t=$('toast');t.innerHTML=`<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="var(--bar-good)"/><path d="M6 10.4l2.6 2.6L14 7.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>${esc(msg)}`;
   t.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove('show'),2600)}
 /* the Add transaction sheet */
 let sheetOpen=false;
@@ -2817,10 +2817,49 @@ document.addEventListener('change',e=>{
     if(k==='nameA'||k==='nameB'){plan.people[k==='nameA'?'a':'b']=el.value.trim().slice(0,20)||(k==='nameA'?'You':'Spouse')}
     else if(k==='startDay'){plan.settings.startDay=num(el.value);curMonth=thisPeriod()}
     else if(k==='remindDays'){plan.settings.remindDays=num(el.value)}
-    savePlan(0);scheduleReminders();render();return}
+    savePlan(0);scheduleReminders();render();savedToast(el);return}
   if(!el.dataset||!el.dataset.k)return;
-  applyInput(el);savePlan();setTimeout(rerenderKeepFocus,0);
+  applyInput(el);savePlan();setTimeout(rerenderKeepFocus,0);savedToast(el);
 });
+// every edit gets the little confirmation under the bar: "Saved · Electric $185.00"
+function savedToast(el){
+  const row=el.closest('.pline,.drow,.bill2,.inc-row,.field,.set-row,.fund-row,.jar');
+  let name=(el.labels&&el.labels[0]&&el.labels[0].textContent)||el.getAttribute('aria-label')||(row&&(row.querySelector('label,.nm span,b,h3')||{}).textContent)||'';
+  name=name.replace(/\s+/g,' ').trim().replace(/ value$/,'');
+  if(el.tagName==='INPUT'&&!el.classList.contains('money')&&el.type!=='date'){toast(`Saved · ${el.value.trim()||name}`);return}
+  const v=el.tagName==='SELECT'?(el.options[el.selectedIndex]||{}).text:el.classList.contains('money')&&/amount|amt|balance|take|gross|extra|payment|price|fund|monthly|insurance|\$|value|target|minimum|line:/i.test((el.dataset.k||'')+name)?fmt.format(num(el.value)):el.value;
+  toast(`Saved · ${name}${name&&v?' ':''}${v||''}`.trim());
+}
+// buttons that change something: a note that says what happened (unless the action already said so itself)
+function actionNote(t){
+  const d=t.dataset,c=t.classList.contains('confirm');
+  if(d.del&&c)return 'Transaction deleted';
+  if(d.delline)return 'Line removed';
+  if(d.delgroup&&c)return 'Category removed';
+  if(d.delbill&&c)return 'Bill removed';
+  if(d.delacct&&c)return 'Account removed';
+  if(d.deljar&&c)return 'Jar removed';
+  if(d.delinc&&c)return 'Income removed';
+  if(d.deldebt)return 'Debt removed';
+  if(d.paid)return t.getAttribute('aria-pressed')==='true'?'Marked not paid':'Marked paid';
+  if(d.stepdone)return `Step ${+d.stepdone+1} marked done`;
+  if(d.stepundo)return `Step ${+d.stepundo+1} reopened`;
+  if(d.jaradd)return 'Added this month’s amount to the jar';
+  if(d.jarundo)return 'Took this month’s amount back out';
+  if(d.assignrest!=null||t.id==='assign-rest')return 'Assigned to your Baby Step';
+  if(d.addinc!=null)return 'Income added';
+  if(d.set||d.pref)return 'Setting saved';
+  if(t.id==='add-debt')return 'Debt added';
+  if(t.id==='gi-add'&&($('gi-name')||{}).value)return `Added ${($('gi-name')||{}).value.trim()}`;
+  if(t.id==='ng-add'&&($('ng-name')||{}).value)return `Added the ${($('ng-name')||{}).value.trim()} category`;
+  if(t.id==='clear-examples')return 'Examples cleared';
+  if(d.showempty!=null||t.classList.contains('showempty'))return '';
+  return '';
+}
+document.addEventListener('click',e=>{
+  const t=e.target.closest&&e.target.closest('button');if(!t)return;const msg=actionNote(t);if(!msg)return;
+  const before=toast.n||0;setTimeout(()=>{if((toast.n||0)===before)toast(msg)},0);
+},true);
 // on the Mac the bar's empty space moves the window like a title bar; the app needs to know where the buttons are
 function sendBarRects(late){
   if(Store.mode!=='native')return;
