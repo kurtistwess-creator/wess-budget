@@ -2959,6 +2959,8 @@ async function boot(){
   curMonth=thisPeriod();
   scheduleReminders();
   render(true);
+  // arriving from the confirmation email: say so plainly
+  if(/type=signup|type=email/.test(location.hash)){history.replaceState(null,'',location.pathname);cloudMsg='✓ Email confirmed. You can sign in now (on the Mac app, click Sign in).';try{localStorage.setItem(LS+'-cloud-offered','1')}catch(e){}setTimeout(openCloud,600)}
   // the first time on a device that can share, offer to sign in
   if(Cloud.ready&&!Cloud.on){let seen=false;try{seen=localStorage.getItem(LS+'-cloud-offered')}catch(e){}if(!seen){try{localStorage.setItem(LS+'-cloud-offered','1')}catch(e){}setTimeout(openCloud,900)}}
 }
